@@ -2046,6 +2046,12 @@ async def drive_files_list(request: Request):
     query = _drive_q_parse(q)  # 400 on a clause Backlot cannot evaluate; None when there is no q
     # Measured 2026-09-23: a token the API did not issue is 400 `Invalid Value`, where an empty one
     # is the first page.
+
+    if order and query is not None and any(
+    term.field == "fullText" for term in _drive_q_terms(query)
+    ):
+        raise gerr.fulltext_order_not_supported()
+
     offset = decode_cursor_or_none(gerr.first_repeat(params, "pageToken"))
     if offset is None:
         raise gerr.invalid_value("pageToken")

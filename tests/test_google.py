@@ -1073,6 +1073,8 @@ def test_drive_a_page_token_it_did_not_issue_is_refused(client, admin_h):
         ([("orderBy", "name,name"), ("q", "nosuchfield = 1")], 403, "orderBy"),
         ([("pageToken", "BOGUS"), ("orderBy", "name,name")], 403, "orderBy"),
         ([("fields", "bogus"), ("orderBy", "name,name")], 403, "orderBy"),
+        ([("pageToken", "BOGUS"), ("q", "fullText contains 'palette'"), ("orderBy", "name")], 403, "orderBy"),
+        ([("fields", "bogus"), ("q", "fullText contains 'palette'"), ("orderBy", "name")], 403, "orderBy"),
     ],
 )
 def test_drive_files_list_refuses_in_reals_order(client, admin_h, query, code, location):
@@ -4754,6 +4756,35 @@ def test_drive_q_shapes_clients_send_still_parse(tmp_path):
             r = client.get("/drive/v3/files", headers=h, params={"q": q, "fields": "files(name)"})
             assert r.status_code == 200, f"{q}: {r.text}"
             assert {f["name"] for f in r.json()["files"]} == expected, q
+
+def test_drive_fulltext_with_orderby_is_forbidden(tmp_path):
+    """Drive refuses sorting a query containing a `fullText` term."""
+    from tests._helpers import corpus_client
+
+    with corpus_client(tmp_path, _Q_RECORDS) as (client, settings):
+        h = {"Authorization": f"Bearer {settings.admin_token}"}
+
+        r = client.get(
+            "/drive/v3/files",
+            headers=h,
+            params={
+                "q": "fullText contains 'palette'",
+                "orderBy": "name",
+            },
+        )
+
+        assert r.status_code == 403, r.text
+        err = r.json()["error"]
+
+        assert (
+            err["message"]
+            == "Sorting is not supported for queries with fullText terms. "
+            "Results are always in descending relevance order."
+        )
+        assert err["errors"][0]["reason"] == "forbidden"
+        assert err["errors"][0]["location"] == "orderBy"
+        assert err["errors"][0]["locationType"] == "parameter"
+    
 
 
 def test_drive_q_me_is_the_caller(tmp_path):

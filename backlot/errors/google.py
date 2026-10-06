@@ -173,6 +173,15 @@ def duplicate_sort_keys() -> GoogleError:
         location="orderBy",
     )
 
+def fulltext_order_not_supported() -> GoogleError:
+    """Drive refuses sorting queries that contain a `fullText` term."""
+    return GoogleError(
+        403,
+        "Sorting is not supported for queries with fullText terms. "
+        "Results are always in descending relevance order.",
+        reason="forbidden",
+        location="orderBy",
+    )
 
 def not_found_file(file_id: str) -> GoogleError:
     """Drive's not-found, which names the id so a batch caller can tell which request failed."""
