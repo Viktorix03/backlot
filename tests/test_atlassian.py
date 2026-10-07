@@ -2462,9 +2462,7 @@ def test_jira_search_post_refuses_nonfinite_max_results(client, admin_h, value):
         content=f'{{"jql": "project = payments", "maxResults": {value}}}',
     )
     assert r.status_code == 400, r.text
-    assert r.json() == {
-        "errorMessages": [errors_atlassian.BODY_UNPARSEABLE]
-    }
+    assert r.json() == {"errorMessages": [errors_atlassian.BODY_UNPARSEABLE]}
 
 
 @pytest.mark.parametrize("value", ["1e400", "-1e400"])
@@ -2478,9 +2476,7 @@ def test_jira_search_post_refuses_infinite_float_as_invalid_payload(client, admi
         content=f'{{"jql": "project = payments", "maxResults": {value}}}',
     )
     assert r.status_code == 400, r.text
-    assert r.json() == {
-        "errorMessages": [errors_atlassian.BODY_NOT_AN_OBJECT]
-    }
+    assert r.json() == {"errorMessages": [errors_atlassian.BODY_NOT_AN_OBJECT]}
 
 
 @pytest.mark.parametrize("fields", [[["id"]], [{}], {}])
@@ -2494,9 +2490,7 @@ def test_jira_search_post_refuses_invalid_fields_shape(client, admin_h, fields):
         fields=fields,
     )
     assert r.status_code == 400, r.text
-    assert r.json() == {
-        "errorMessages": [errors_atlassian.BODY_NOT_AN_OBJECT]
-    }
+    assert r.json() == {"errorMessages": [errors_atlassian.BODY_NOT_AN_OBJECT]}
 
 
 def test_jira_search_post_refuses_deeply_nested_fields(client, admin_h):
@@ -2511,9 +2505,7 @@ def test_jira_search_post_refuses_deeply_nested_fields(client, admin_h):
         content='{"jql": "project = payments", "fields": ' + nested + "}",
     )
     assert r.status_code == 400, r.text
-    assert r.json() == {
-        "errorMessages": [errors_atlassian.BODY_NOT_AN_OBJECT]
-    }
+    assert r.json() == {"errorMessages": [errors_atlassian.BODY_NOT_AN_OBJECT]}
 
 
 @pytest.mark.parametrize("value", [2147483648, -2147483649])
@@ -2527,15 +2519,11 @@ def test_jira_search_post_refuses_max_results_outside_java_int(client, admin_h, 
         maxResults=value,
     )
     assert r.status_code == 400, r.text
-    assert r.json() == {
-        "errorMessages": [errors_atlassian.BODY_NOT_AN_OBJECT]
-    }
+    assert r.json() == {"errorMessages": [errors_atlassian.BODY_NOT_AN_OBJECT]}
 
 
 @pytest.mark.parametrize("digits", [1001, 4300])
-def test_jira_search_post_refuses_oversized_max_results_as_failed_read(
-    client, admin_h, digits
-):
+def test_jira_search_post_refuses_oversized_max_results_as_failed_read(client, admin_h, digits):
     """Measured 2026-10-06: integer literals from 1001 through 4300 digits make Jira fail while
     reading the request and return its RFC 7807 `Failed to read request` response."""
     value = "1" * digits
@@ -2565,9 +2553,7 @@ def test_jira_search_post_refuses_1000_digit_max_results_as_invalid_payload(clie
         content=f'{{"jql": "project = payments", "maxResults": {value}}}',
     )
     assert r.status_code == 400, r.text
-    assert r.json() == {
-        "errorMessages": [errors_atlassian.BODY_NOT_AN_OBJECT]
-    }
+    assert r.json() == {"errorMessages": [errors_atlassian.BODY_NOT_AN_OBJECT]}
 
 
 def test_jira_search_post_refuses_4301_digit_max_results_as_parse_error(client, admin_h):
@@ -2580,9 +2566,7 @@ def test_jira_search_post_refuses_4301_digit_max_results_as_parse_error(client, 
         content=f'{{"jql": "project = payments", "maxResults": {value}}}',
     )
     assert r.status_code == 400, r.text
-    assert r.json() == {
-        "errorMessages": [errors_atlassian.BODY_UNPARSEABLE]
-    }
+    assert r.json() == {"errorMessages": [errors_atlassian.BODY_UNPARSEABLE]}
 
 
 def test_jira_search_post_keeps_java_int_max_as_range_error(client, admin_h):

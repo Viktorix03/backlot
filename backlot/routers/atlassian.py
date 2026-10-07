@@ -173,6 +173,7 @@ _JIRA_COMMENT_PAGE_MAX = 100
 _JIRA_ORDER_FIELD = "created"
 _JIRA_SEARCH_MAX_JSON_DEPTH = 1000
 
+
 def _jira_order_desc(raw: str) -> bool:
     """Whether ``orderBy`` asks for the reverse, or Jira's 400 for a field it does not order by.
 
@@ -523,25 +524,19 @@ def _jira_search_max_results(value) -> int:
         try:
             n = int(value)
         except (ValueError, OverflowError):
-            raise errors_atlassian.body_not_read(
-                errors_atlassian.BODY_NOT_AN_OBJECT
-            ) from None
+            raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT) from None
     elif isinstance(value, str):
         try:
             n = int(value)
         except ValueError:
-            raise errors_atlassian.body_not_read(
-                errors_atlassian.BODY_NOT_AN_OBJECT
-            ) from None
+            raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT) from None
     else:
         raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT)
     # Jackson binds this member to Java `int`, so Python's unbounded integer must be narrowed before
     # the endpoint's separate 1-5000 validation. 2147483647 binds and later fails that range;
     # 2147483648 and -2147483649 fail the request body itself.
     if not -(2**31) <= n <= 2**31 - 1:
-        raise errors_atlassian.body_not_read(
-            errors_atlassian.BODY_NOT_AN_OBJECT
-        )
+        raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT)
     return n
 
 
@@ -2101,7 +2096,9 @@ async def _jira_search_body(request: Request) -> dict:
     if _jira_json_too_deep(text):
         raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT)
     try:
-        parsed, _end = json.JSONDecoder(parse_constant=_reject_json_constant,parse_int=_jira_json_int).raw_decode(text.lstrip(" \t\n\r"))
+        parsed, _end = json.JSONDecoder(
+            parse_constant=_reject_json_constant, parse_int=_jira_json_int
+        ).raw_decode(text.lstrip(" \t\n\r"))
     except (ValueError, RecursionError):
         message = (
             errors_atlassian.BODY_NOT_AN_OBJECT
