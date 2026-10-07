@@ -513,6 +513,26 @@ def body_not_read(message: str) -> AtlassianError:
     return AtlassianError(400, {"errorMessages": [message]})
 
 
+def failed_to_read_request(path: str) -> AtlassianError:
+    """Jira's RFC 7807 refusal when the search request body cannot be read.
+
+    Measured 2026-10-06 on `POST /rest/api/3/search/jql`: oversized integer literals in the
+    request-reader boundary return this `application/problem+json` response rather than Jira's
+    ordinary `errorMessages` envelope.
+    """
+    return AtlassianError(
+        400,
+        {
+            "type": "about:blank",
+            "title": "Bad Request",
+            "status": 400,
+            "detail": "Failed to read request",
+            "instance": _instance(path),
+        },
+        media_type=PROBLEM_JSON,
+    )
+
+
 def unbounded_jql() -> AtlassianError:
     """Jira's 400 for `search/jql` given no `jql` at all — on GET or POST, measured 2026-09-16
     against `brekkylab.atlassian.net`. The sentence is Backlot's own: real answers in the
