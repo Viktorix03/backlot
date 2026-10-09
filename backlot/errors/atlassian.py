@@ -514,11 +514,10 @@ def body_not_read(message: str) -> AtlassianError:
 
 
 def failed_to_read_request(path: str) -> AtlassianError:
-    """Jira's RFC 7807 refusal when the search request body cannot be read.
-
-    Measured 2026-10-06 on `POST /rest/api/3/search/jql`: oversized integer literals in the
-    request-reader boundary return this `application/problem+json` response rather than Jira's
-    ordinary `errorMessages` envelope.
+    """Jira's RFC 7807 refusal for a `search/jql` body its reader will not read (see
+    `routers.atlassian._jira_json_number` for which). Measured 2026-10-06 on
+    `POST /rest/api/3/search/jql`, in `application/problem+json` where the other body refusals use
+    the `errorMessages` envelope.
     """
     return AtlassianError(
         400,

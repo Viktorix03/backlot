@@ -95,11 +95,6 @@ class JiraField(_ALoose):
     name: str
 
 
-class _JiraOversizedInt:
-    def __init__(self, raw: str):
-        self.raw = raw
-
-
 class ConfluenceResults(_ALoose):
     results: list[dict] = []
 
@@ -171,7 +166,6 @@ _P_CONTENT_CHILD = {"parameters": [qp("limit", "integer"), qp("start", "integer"
 # end is echoed back unchanged with an empty page rather than refused.
 _JIRA_COMMENT_PAGE_MAX = 100
 _JIRA_ORDER_FIELD = "created"
-_JIRA_SEARCH_MAX_JSON_DEPTH = 1000
 
 
 def _jira_order_desc(raw: str) -> bool:
@@ -521,10 +515,7 @@ def _jira_search_max_results(value) -> int:
     if value is None:
         return 0
     if isinstance(value, (int, float)):
-        try:
-            n = int(value)
-        except (ValueError, OverflowError):
-            raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT) from None
+        n = value
     elif isinstance(value, str):
         try:
             n = int(value)
@@ -534,10 +525,11 @@ def _jira_search_max_results(value) -> int:
         raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT)
     # Jackson binds this member to Java `int`, so Python's unbounded integer must be narrowed before
     # the endpoint's separate 1-5000 validation. 2147483647 binds and later fails that range;
-    # 2147483648 and -2147483649 fail the request body itself.
+    # 2147483648 and -2147483649 fail the request body itself, and so do 2147483647.5 and the
+    # infinite float `1e400` reads as, which is why a float is compared before it is truncated.
     if not -(2**31) <= n <= 2**31 - 1:
         raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT)
-    return n
+    return int(n)
 
 
 @router.api_route(
@@ -577,12 +569,13 @@ async def jira_search(request: Request):
         raw_fields = body.get("fields")
         if raw_fields is not None and (
             not isinstance(raw_fields, list)
-            or any(not isinstance(field, str) for field in raw_fields)
+            or any(isinstance(field, (list, dict, _JiraOversizedNumber)) for field in raw_fields)
         ):
             # `fields` is declared by the request bean even though Backlot does not otherwise use
-            # it. Real Jira still binds its value: a list of strings is accepted, while an object,
-            # nested list, or list containing an object is a body-wide invalid-payload refusal
-            # (measured 2026-10-06).
+            # it. Real Jira still binds its value: a list of scalars is served (`["id"]`, `[1]`,
+            # `[null]`, `[true]`), while an object, a bare string, a nested list, a list holding an
+            # object, or one holding a number over 1000 digits is a body-wide invalid-payload
+            # refusal (measured 2026-10-06 and 2026-10-09).
             raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT)
         # A JSON null is the parameter unsent, not the string "None": real answers
         # `{"jql": null}` with the same unbounded-JQL refusal it gives `{}` (measured 2026-09-16).
@@ -2002,54 +1995,29 @@ def _reject_json_constant(value: str):
     raise ValueError(value)
 
 
-def _jira_json_too_deep(text: str) -> bool:
-    """Whether JSON nesting exceeds Backlot's deterministic Jira request-body limit.
+class _JiraOversizedNumber:
+    """A number literal of more than 1000 digits, left unconverted for the body checks to refuse."""
 
-    Count only brackets outside strings — brackets inside `"..."` are data, and an escaped quote
-    must not end the string. This preflight keeps a deeply nested body from reaching CPython's
-    version-dependent recursion limit and turning Jira's measured 400 into an uncaught 500.
+    def __init__(self, raw: str):
+        self.raw = raw
+
+
+def _jira_json_number(read):
+    """A `parse_int` / `parse_float` hook that counts a literal's digits before `read` sees it.
+
+    Real counts every digit, the fraction's and the exponent's included, and reads a literal of up
+    to 1000 (measured 2026-10-06 and 2026-10-09: `1.` and 998 digits then `e1` is served, while
+    `1.` and 999 then `e1`, `0.` and 999 zeros then `1`, and 1000 digits then `.5` get
+    `Failed to read request`, as integers of 1001, 4300, 4301 and 5000 digits are). Counting here
+    also keeps a literal past Python's own 4300-digit `int` limit away from `int()`.
     """
-    depth = 0
-    in_string = False
-    escaped = False
 
-    for char in text:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
+    def parse(raw: str):
+        if sum(ch.isdigit() for ch in raw) > 1000:
+            return _JiraOversizedNumber(raw)
+        return read(raw)
 
-        if char == '"':
-            in_string = True
-        elif char in "[{":
-            depth += 1
-            if depth > _JIRA_SEARCH_MAX_JSON_DEPTH:
-                return True
-        elif char in "]}":
-            depth -= 1
-
-    return False
-
-
-def _jira_json_int(raw: str):
-    """Read an integer literal with Jira's measured large-number boundaries.
-
-    Measured 2026-10-06: a 1000-digit `maxResults` reaches normal request binding and is refused
-    as an invalid payload; 1001 through 4300 digits instead produce Jira's RFC 7807
-    "Failed to read request"; at 4301 digits the body is refused as malformed JSON. `parse_int`
-    receives the literal before Python turns it into its own unbounded integer, so those three
-    cases can be preserved explicitly.
-    """
-    digits = raw[1:] if raw.startswith("-") else raw
-    if len(digits) > 4300:
-        raise ValueError(raw)
-    if len(digits) > 1000:
-        return _JiraOversizedInt(raw)
-    return int(raw)
+    return parse
 
 
 async def _jira_search_body(request: Request) -> dict:
@@ -2078,10 +2046,12 @@ async def _jira_search_body(request: Request) -> dict:
     `str.lstrip()` would skip it and read the object behind it. Bytes that are not UTF-8 are the
     not-an-object sentence, where `errors="replace"` would repair them into U+FFFD and parse.
 
-    Python's decoder is deliberately constrained in three places where its behaviour differs from
-    Jira's Jackson reader: `NaN`/`Infinity` are rejected rather than accepted as floats, excessive
-    nesting is refused before CPython's version-dependent recursion limit, and unusually wide
-    integer literals preserve Jira's measured 1000/1001/4301-digit response boundaries.
+    Python's decoder is constrained in three places where it reads differently from real:
+    `NaN` and `Infinity` are the parse error (see :func:`_reject_json_constant`), a number literal
+    past 1000 digits is real's problem+json `Failed to read request` in `jql`, `maxResults` and
+    `nextPageToken` (see :func:`_jira_json_number`), and nesting deep enough to exhaust Python's
+    reader is the not-an-object sentence, the refusal real gives such a body at every depth
+    measured.
     """
     content_type = request.headers.get("content-type")
     if (content_type or "").split(";")[0].strip().lower() != "application/json":
@@ -2093,13 +2063,17 @@ async def _jira_search_body(request: Request) -> dict:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT) from None
-    if _jira_json_too_deep(text):
-        raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT)
     try:
         parsed, _end = json.JSONDecoder(
-            parse_constant=_reject_json_constant, parse_int=_jira_json_int
+            parse_constant=_reject_json_constant,
+            parse_int=_jira_json_number(int),
+            parse_float=_jira_json_number(float),
         ).raw_decode(text.lstrip(" \t\n\r"))
-    except (ValueError, RecursionError):
+    except RecursionError:
+        # Real refuses a `fields` nested 998 to 300000 deep as a payload it cannot bind (measured
+        # 2026-10-06), so the depth Python's reader gives out at must not change the answer.
+        raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT) from None
+    except ValueError:
         message = (
             errors_atlassian.BODY_NOT_AN_OBJECT
             if not raw.strip()
@@ -2110,7 +2084,10 @@ async def _jira_search_body(request: Request) -> dict:
         raise errors_atlassian.body_not_read(errors_atlassian.BODY_EMPTY)
     if not isinstance(parsed, dict):
         raise errors_atlassian.body_not_read(errors_atlassian.BODY_NOT_AN_OBJECT)
-    if isinstance(parsed.get("maxResults"), _JiraOversizedInt):
+    if any(
+        isinstance(parsed.get(name), _JiraOversizedNumber)
+        for name in ("jql", "maxResults", "nextPageToken")
+    ):
         raise errors_atlassian.failed_to_read_request(request.url.path)
     return parsed
 
