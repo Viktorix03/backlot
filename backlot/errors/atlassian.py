@@ -515,7 +515,7 @@ def body_not_read(message: str) -> AtlassianError:
 
 def failed_to_read_request(path: str) -> AtlassianError:
     """Jira's RFC 7807 refusal for a `search/jql` body its reader will not read (see
-    `routers.atlassian._jira_json_number` for which). Measured 2026-10-06 on
+    `routers.atlassian._jira_search_body` for which). Measured 2026-10-06 on
     `POST /rest/api/3/search/jql`, in `application/problem+json` where the other body refusals use
     the `errorMessages` envelope.
     """
